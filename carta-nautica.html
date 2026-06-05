@@ -278,31 +278,40 @@ function updateNav(lat,lon,knots){
 // ============================================================
 //  GPS REALE
 // ============================================================
+function handleFix(p){
+  badge.className='on'; $('gpsTxt').textContent='GPS ON'; hideNotice();
+  const c=p.coords;
+  const kn = (c.speed!=null && c.speed>=0) ? c.speed*KN_PER_MS : null;
+  // l'heading dal GPS è affidabile solo in movimento
+  const cog= (c.heading!=null && !isNaN(c.heading) && c.speed>0.5) ? c.heading : null;
+  updatePosition(c.latitude, c.longitude, kn, cog);
+  if(following) map.setView([c.latitude,c.longitude], Math.max(map.getZoom(),15));
+}
+
 function startGPS(){
   stopSim();
   if(!('geolocation' in navigator)){ showNotice('Questo browser non supporta la geolocalizzazione.'); return; }
-  badge.className='on'; $('gpsTxt').textContent='GPS…'; $('btnGps').classList.add('active');
+  badge.className='on'; $('gpsTxt').textContent='CERCO…'; $('btnGps').classList.add('active');
+  showNotice('<b>Cerco il segnale GPS…</b> Tieni il telefono con vista libera sul cielo: a freddo la prima posizione può richiedere 30–60 s.');
 
+  // 1) Fix rapido iniziale (anche da rete wifi/cella) per centrare subito la mappa
+  navigator.geolocation.getCurrentPosition(handleFix, ()=>{},
+    { enableHighAccuracy:false, timeout:10000, maximumAge:60000 });
+
+  // 2) Tracking continuo ad alta precisione — NON si ferma sui timeout
   watchId=navigator.geolocation.watchPosition(
-    p=>{
-      $('gpsTxt').textContent='GPS ON';
-      hideNotice();
-      const c=p.coords;
-      const kn = (c.speed!=null && c.speed>=0) ? c.speed*KN_PER_MS : null;
-      const cog= (c.heading!=null && !isNaN(c.heading)) ? c.heading : null;
-      updatePosition(c.latitude, c.longitude, kn, cog);
-      if(following) map.setView([c.latitude,c.longitude], Math.max(map.getZoom(),14));
-    },
+    handleFix,
     err=>{
-      stopGPS();
-      let m='<b>GPS non disponibile.</b> ';
-      if(err.code===1) m+='Permesso negato — autorizza la posizione nelle impostazioni del browser.';
-      else if(err.code===2) m+='Posizione non rilevabile (nessun segnale).';
-      else m+=err.message;
-      m+='<br><br>Se sei nell\'anteprima dentro l\'app Claude il GPS è bloccato: apri la pagina in <b>HTTPS</b> (GitHub/Cloudflare Pages) o usa <b>▶ Simula</b> per provare.';
-      showNotice(m, true);
+      if(err.code===1){   // permesso negato: questo sì è bloccante
+        stopGPS();
+        showNotice('<b>Permesso negato.</b> Tocca l\'icona 🔒/ⓘ a sinistra dell\'indirizzo → <b>Autorizzazioni</b> → consenti <b>Posizione</b>, poi ripremi 📡.');
+        return;
+      }
+      // code 2 (non disponibile) / 3 (timeout): continua a cercare, watch attivo
+      $('gpsTxt').textContent='CERCO…';
+      showNotice('<b>Cerco il segnale…</b> Se sei al chiuso avvicinati a una finestra o esci: il fix arriva appena il GPS aggancia i satelliti. La ricerca resta attiva.');
     },
-    { enableHighAccuracy:true, maximumAge:1000, timeout:15000 }
+    { enableHighAccuracy:true, maximumAge:2000, timeout:30000 }
   );
 }
 function stopGPS(){
