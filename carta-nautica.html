@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#08151f">
+<title>Carta Nautica — Tracker</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Saira:wght@500;600;700&family=Azeret+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#08151f; --panel:rgba(10,30,46,.92); --panel-solid:#0c2233;
+    --line:rgba(58,124,160,.28);
+    --accent:#1ce8d4; --amber:#ffb02e; --danger:#ff5470;
+    --text:#e8f4f8; --muted:#6f93ad;
+    --label:'Saira',system-ui,sans-serif;
+    --num:'Azeret Mono',ui-monospace,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:var(--bg);
+    font-family:var(--label);color:var(--text);
+    user-select:none;-webkit-user-select:none;overscroll-behavior:none}
+  #map{position:absolute;inset:0;background:#06101a;z-index:0}
+  .leaflet-container{background:#06101a;font-family:var(--label)}
+
+  /* ── Barra di stato superiore ── */
+  #topbar{position:absolute;top:0;left:0;right:0;z-index:500;
+    display:flex;align-items:center;gap:8px;
+    padding:calc(env(safe-area-inset-top) + 8px) 12px 8px;
+    background:linear-gradient(180deg,var(--bg) 30%,transparent);
+    pointer-events:none}
+  #topbar .title{font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    font-size:13px;color:var(--text);text-shadow:0 1px 4px #000}
+  #gpsBadge{margin-left:auto;display:flex;align-items:center;gap:6px;
+    font-family:var(--num);font-size:11px;font-weight:600;letter-spacing:.04em;
+    padding:5px 10px;border-radius:999px;background:var(--panel);
+    border:1px solid var(--line);backdrop-filter:blur(8px);pointer-events:auto}
+  #gpsDot{width:8px;height:8px;border-radius:50%;background:var(--danger);
+    box-shadow:0 0 8px var(--danger);transition:.3s}
+  #gpsBadge.on #gpsDot{background:var(--accent);box-shadow:0 0 10px var(--accent);
+    animation:pulse 1.6s infinite}
+  #gpsBadge.sim #gpsDot{background:var(--amber);box-shadow:0 0 10px var(--amber)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+  /* ── Pulsanti laterali ── */
+  #side{position:absolute;right:12px;top:46%;transform:translateY(-50%);
+    z-index:500;display:flex;flex-direction:column;gap:10px}
+  .fab{width:52px;height:52px;border-radius:16px;border:1px solid var(--line);
+    background:var(--panel);backdrop-filter:blur(10px);color:var(--text);
+    display:flex;align-items:center;justify-content:center;
+    font-size:22px;cursor:pointer;transition:.15s;
+    box-shadow:0 6px 20px rgba(0,0,0,.4)}
+  .fab:active{transform:scale(.9)}
+  .fab.active{background:var(--accent);color:#06101a;border-color:var(--accent);
+    box-shadow:0 0 18px rgba(28,232,212,.5)}
+  .fab small{font-family:var(--label);font-size:9px;font-weight:700;
+    position:absolute;margin-top:34px;letter-spacing:.05em}
+
+  /* ── Pannello strumenti inferiore ── */
+  #panel{position:absolute;left:0;right:0;bottom:0;z-index:500;
+    background:var(--panel);backdrop-filter:blur(14px);
+    border-top:1px solid var(--line);
+    border-radius:20px 20px 0 0;
+    padding:14px 16px calc(env(safe-area-inset-bottom) + 14px);
+    box-shadow:0 -8px 30px rgba(0,0,0,.5)}
+  #panel .grip{width:40px;height:4px;border-radius:2px;background:var(--muted);
+    opacity:.4;margin:0 auto 12px}
+  .row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .cell{background:rgba(6,16,26,.55);border:1px solid var(--line);
+    border-radius:12px;padding:9px 10px;min-height:62px;
+    display:flex;flex-direction:column;justify-content:center}
+  .cell .lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--muted);font-weight:600;margin-bottom:3px}
+  .cell .val{font-family:var(--num);font-size:21px;font-weight:700;
+    line-height:1;color:var(--text)}
+  .cell .val .u{font-size:11px;color:var(--muted);font-weight:600;margin-left:3px}
+  .cell.hl .val{color:var(--accent)}
+  .cell.eta .val{color:var(--amber)}
+  .cell.eta.idle .val{color:var(--muted)}
+
+  #posline{margin-top:10px;font-family:var(--num);font-size:11px;
+    color:var(--muted);text-align:center;letter-spacing:.03em}
+
+  /* ── Banner avviso GPS ── */
+  #notice{position:absolute;left:12px;right:12px;top:64px;z-index:600;
+    background:var(--panel-solid);border:1px solid var(--amber);
+    border-radius:14px;padding:12px 14px;font-size:12.5px;line-height:1.45;
+    color:var(--text);box-shadow:0 8px 30px rgba(0,0,0,.5);display:none}
+  #notice b{color:var(--amber)}
+  #notice button{margin-top:9px;background:var(--amber);color:#06101a;
+    border:none;border-radius:8px;padding:7px 14px;font-weight:700;
+    font-family:var(--label);font-size:12px;cursor:pointer}
+
+  /* ── Barra azioni waypoint ── */
+  #wpbar{position:absolute;left:12px;right:12px;top:64px;z-index:550;
+    background:var(--accent);color:#06101a;border-radius:12px;
+    padding:10px 14px;font-weight:700;font-size:12.5px;letter-spacing:.03em;
+    text-align:center;display:none;box-shadow:0 6px 20px rgba(28,232,212,.4);
+    animation:slidein .25s ease}
+  @keyframes slidein{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+
+  /* ── Icona barca ── */
+  .boat-ic{display:flex;align-items:center;justify-content:center}
+  .boat-arrow{width:0;height:0;border-left:11px solid transparent;
+    border-right:11px solid transparent;border-bottom:28px solid var(--accent);
+    filter:drop-shadow(0 0 6px rgba(28,232,212,.8));transition:transform .25s linear}
+  .wp-ic{width:18px;height:18px;border-radius:50%;background:var(--amber);
+    border:3px solid #06101a;box-shadow:0 0 0 2px var(--amber),0 0 12px var(--amber)}
+
+  .leaflet-control-attribution{font-size:9px;background:rgba(6,16,26,.6)!important;color:var(--muted)!important}
+  .leaflet-control-attribution a{color:var(--accent)!important}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="topbar">
+  <span class="title">⚓ Carta Nautica</span>
+  <div id="gpsBadge"><span id="gpsDot"></span><span id="gpsTxt">GPS OFF</span></div>
+</div>
+
+<div id="notice"></div>
+<div id="wpbar">📍 Tocca la mappa per posizionare il waypoint</div>
+
+<div id="side">
+  <button class="fab" id="btnGps" title="GPS">📡</button>
+  <button class="fab" id="btnWp" title="Waypoint">📍</button>
+  <button class="fab active" id="btnFollow" title="Centra">🎯</button>
+  <button class="fab" id="btnSim" title="Simula">▶</button>
+</div>
+
+<div id="panel">
+  <div class="grip"></div>
+  <div class="row">
+    <div class="cell hl"><span class="lbl">SOG</span><span class="val"><span id="sog">0.0</span><span class="u">kn</span></span></div>
+    <div class="cell"><span class="lbl">COG</span><span class="val"><span id="cog">---</span><span class="u">°</span></span></div>
+    <div class="cell"><span class="lbl">Dist. WP</span><span class="val"><span id="dist">--</span><span class="u">NM</span></span></div>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <div class="cell"><span class="lbl">Rotta WP</span><span class="val"><span id="brg">---</span><span class="u">°</span></span></div>
+    <div class="cell eta idle"><span class="lbl">ETA Arrivo</span><span class="val" id="eta">--:--</span></div>
+    <div class="cell eta idle"><span class="lbl">Mancano</span><span class="val" id="ttg">--</span></div>
+  </div>
+  <div id="posline">Posizione non disponibile</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+/* ============================================================
+   CARTA NAUTICA — tracker barca con ETA da velocità GPS
+   ============================================================ */
+const KN_PER_MS = 1.94384;      // m/s -> nodi
+const M_PER_NM  = 1852;         // metri per miglio nautico
+
+// ---- Mappa ----
+const map = L.map('map', { zoomControl:false, attributionControl:true })
+  .setView([40.5, 8.3], 11);   // default: Sardegna nord-ovest
+
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom:19, attribution:'© OpenStreetMap'
+}).addTo(map);
+
+// Overlay carta nautica (segnali, boe, fari, fondali) — OpenSeaMap
+L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+  maxZoom:18, attribution:'© OpenSeaMap'
+}).addTo(map);
+
+L.control.zoom({ position:'topleft' }).addTo(map);
+
+// ---- Stato ----
+let watchId=null, simTimer=null, following=true, wpMode=false;
+let boat=null, wp=null, track=[], trackLine=null;
+let lastFix=null;          // {lat,lon,t}
+let sim={lat:40.50,lon:8.30,cog:45,knots:6};
+
+// ---- Elementi UI ----
+const $=id=>document.getElementById(id);
+const badge=$('gpsBadge');
+
+// ---- Marker barca ----
+const boatIcon = L.divIcon({ className:'boat-ic', html:'<div class="boat-arrow"></div>',
+  iconSize:[22,28], iconAnchor:[11,14] });
+
+function setBoatRotation(deg){
+  if(!boat) return;
+  const el=boat.getElement(); if(!el) return;
+  const a=el.querySelector('.boat-arrow');
+  if(a) a.style.transform=`rotate(${deg||0}deg)`;
+}
+
+// ============================================================
+//  CALCOLI NAUTICI
+// ============================================================
+function haversineNM(la1,lo1,la2,lo2){
+  const R=6371000, r=Math.PI/180;
+  const dLa=(la2-la1)*r, dLo=(lo2-lo1)*r;
+  const a=Math.sin(dLa/2)**2 + Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dLo/2)**2;
+  return (R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)))/M_PER_NM;
+}
+function bearing(la1,lo1,la2,lo2){
+  const r=Math.PI/180, d=180/Math.PI;
+  const y=Math.sin((lo2-lo1)*r)*Math.cos(la2*r);
+  const x=Math.cos(la1*r)*Math.sin(la2*r)-Math.sin(la1*r)*Math.cos(la2*r)*Math.cos((lo2-lo1)*r);
+  return (Math.atan2(y,x)*d+360)%360;
+}
+function fmtLat(v){const h=v>=0?'N':'S';v=Math.abs(v);const d=Math.floor(v);const m=((v-d)*60).toFixed(3);return `${d}°${m.padStart(6,'0')}'${h}`;}
+function fmtLon(v){const h=v>=0?'E':'W';v=Math.abs(v);const d=Math.floor(v);const m=((v-d)*60).toFixed(3);return `${d}°${m.padStart(6,'0')}'${h}`;}
+
+// ============================================================
+//  AGGIORNAMENTO POSIZIONE (sorgente unica: GPS o simulazione)
+// ============================================================
+function updatePosition(lat, lon, knots, cog){
+  const now = Date.now();
+
+  // Velocità calcolata dai fix se il GPS non la fornisce
+  if((knots==null || isNaN(knots)) && lastFix){
+    const dt=(now-lastFix.t)/1000;
+    if(dt>0.4){ knots=(haversineNM(lastFix.lat,lastFix.lon,lat,lon)/dt)*3600; }
+  }
+  // COG calcolato dai fix se non fornito
+  if((cog==null || isNaN(cog)) && lastFix){
+    const d=haversineNM(lastFix.lat,lastFix.lon,lat,lon);
+    if(d>0.001) cog=bearing(lastFix.lat,lastFix.lon,lat,lon);
+  }
+  if(knots==null||isNaN(knots)||knots<0) knots=0;
+  lastFix={lat,lon,t:now};
+
+  // Marker + traccia
+  const ll=[lat,lon];
+  if(!boat){ boat=L.marker(ll,{icon:boatIcon,interactive:false}).addTo(map); }
+  else boat.setLatLng(ll);
+  setBoatRotation(cog);
+
+  track.push(ll);
+  if(track.length>5000) track.shift();
+  if(!trackLine){ trackLine=L.polyline(track,{color:'#1ce8d4',weight:3,opacity:.65}).addTo(map); }
+  else trackLine.setLatLngs(track);
+
+  if(following) map.panTo(ll,{animate:true,duration:.5});
+
+  // ---- Strumenti ----
+  $('sog').textContent = knots.toFixed(1);
+  $('cog').textContent = (cog==null||isNaN(cog)) ? '---' : Math.round(cog).toString().padStart(3,'0');
+  $('posline').textContent = `${fmtLat(lat)}   ${fmtLon(lon)}`;
+
+  updateNav(lat,lon,knots);
+}
+
+// ---- Calcolo distanza / rotta / ETA verso il waypoint ----
+function updateNav(lat,lon,knots){
+  const etaC=document.querySelectorAll('.cell.eta');
+  if(!wp){
+    $('dist').textContent='--'; $('brg').textContent='---';
+    $('eta').textContent='--:--'; $('ttg').textContent='--';
+    etaC.forEach(c=>c.classList.add('idle')); return;
+  }
+  const dNM=haversineNM(lat,lon,wp.lat,wp.lng);
+  const brg=bearing(lat,lon,wp.lat,wp.lng);
+  $('dist').textContent = dNM<10 ? dNM.toFixed(2) : dNM.toFixed(1);
+  $('brg').textContent  = Math.round(brg).toString().padStart(3,'0');
+
+  if(knots>0.2){
+    const hours=dNM/knots;                       // tempo residuo in ore
+    const ms=hours*3600*1000;
+    const arr=new Date(Date.now()+ms);
+    $('eta').textContent = `${String(arr.getHours()).padStart(2,'0')}:${String(arr.getMinutes()).padStart(2,'0')}`;
+    const H=Math.floor(hours), M=Math.round((hours-H)*60);
+    $('ttg').textContent = H>0 ? `${H}h${String(M).padStart(2,'0')}` : `${M}m`;
+    etaC.forEach(c=>c.classList.remove('idle'));
+  } else {
+    $('eta').textContent='--:--'; $('ttg').textContent='--';
+    etaC.forEach(c=>c.classList.add('idle'));
+  }
+}
+
+// ============================================================
+//  GPS REALE
+// ============================================================
+function startGPS(){
+  stopSim();
+  if(!('geolocation' in navigator)){ showNotice('Questo browser non supporta la geolocalizzazione.'); return; }
+  badge.className='on'; $('gpsTxt').textContent='GPS…'; $('btnGps').classList.add('active');
+
+  watchId=navigator.geolocation.watchPosition(
+    p=>{
+      $('gpsTxt').textContent='GPS ON';
+      hideNotice();
+      const c=p.coords;
+      const kn = (c.speed!=null && c.speed>=0) ? c.speed*KN_PER_MS : null;
+      const cog= (c.heading!=null && !isNaN(c.heading)) ? c.heading : null;
+      updatePosition(c.latitude, c.longitude, kn, cog);
+      if(following) map.setView([c.latitude,c.longitude], Math.max(map.getZoom(),14));
+    },
+    err=>{
+      stopGPS();
+      let m='<b>GPS non disponibile.</b> ';
+      if(err.code===1) m+='Permesso negato — autorizza la posizione nelle impostazioni del browser.';
+      else if(err.code===2) m+='Posizione non rilevabile (nessun segnale).';
+      else m+=err.message;
+      m+='<br><br>Se sei nell\'anteprima dentro l\'app Claude il GPS è bloccato: apri la pagina in <b>HTTPS</b> (GitHub/Cloudflare Pages) o usa <b>▶ Simula</b> per provare.';
+      showNotice(m, true);
+    },
+    { enableHighAccuracy:true, maximumAge:1000, timeout:15000 }
+  );
+}
+function stopGPS(){
+  if(watchId!=null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+  badge.className=''; $('gpsTxt').textContent='GPS OFF'; $('btnGps').classList.remove('active');
+}
+
+// ============================================================
+//  SIMULAZIONE (per testare senza GPS)
+// ============================================================
+function startSim(){
+  stopGPS();
+  badge.className='sim'; $('gpsTxt').textContent='SIMULA'; $('btnSim').classList.add('active');
+  sim.lat=map.getCenter().lat; sim.lon=map.getCenter().lng;
+  lastFix=null;
+  simTimer=setInterval(()=>{
+    // Se c'è un waypoint, punta verso di esso; altrimenti rotta fissa
+    if(wp){ sim.cog=bearing(sim.lat,sim.lon,wp.lat,wp.lng); }
+    const distM=(sim.knots*M_PER_NM/3600)*1;      // metri percorsi in 1s
+    const r=Math.PI/180, dN=distM*Math.cos(sim.cog*r), dE=distM*Math.sin(sim.cog*r);
+    sim.lat += (dN/6371000)/r;
+    sim.lon += (dE/(6371000*Math.cos(sim.lat*r)))/r;
+    updatePosition(sim.lat, sim.lon, sim.knots, sim.cog);
+    if(wp && haversineNM(sim.lat,sim.lon,wp.lat,wp.lng)<0.01) stopSim(); // arrivato
+  },1000);
+}
+function stopSim(){
+  if(simTimer){ clearInterval(simTimer); simTimer=null; }
+  badge.className= watchId!=null?'on':''; if(watchId==null)$('gpsTxt').textContent='GPS OFF';
+  $('btnSim').classList.remove('active');
+}
+
+// ============================================================
+//  WAYPOINT
+// ============================================================
+function setWaypoint(latlng){
+  if(!wp){ wp=L.marker(latlng,{icon:L.divIcon({className:'',html:'<div class="wp-ic"></div>',iconSize:[18,18],iconAnchor:[9,9]})}).addTo(map); }
+  else wp.setLatLng(latlng);
+  wp.lat=latlng.lat; wp.lng=latlng.lng;
+  if(lastFix) updateNav(lastFix.lat,lastFix.lon, parseFloat($('sog').textContent)||0);
+}
+map.on('click', e=>{
+  if(!wpMode) return;
+  setWaypoint(e.latlng);
+  wpMode=false; $('btnWp').classList.remove('active'); $('wpbar').style.display='none';
+});
+
+// ============================================================
+//  BANNER
+// ============================================================
+function showNotice(html){ $('notice').innerHTML=html; $('notice').style.display='block'; }
+function hideNotice(){ $('notice').style.display='none'; }
+
+// ============================================================
+//  PULSANTI
+// ============================================================
+$('btnGps').onclick = ()=> watchId!=null ? stopGPS() : startGPS();
+$('btnSim').onclick = ()=> simTimer ? stopSim() : startSim();
+$('btnWp').onclick  = ()=>{
+  wpMode=!wpMode;
+  $('btnWp').classList.toggle('active',wpMode);
+  $('wpbar').style.display=wpMode?'block':'none';
+};
+$('btnFollow').onclick = ()=>{
+  following=!following;
+  $('btnFollow').classList.toggle('active',following);
+  if(following && lastFix) map.panTo([lastFix.lat,lastFix.lon]);
+};
+map.on('dragstart', ()=>{ following=false; $('btnFollow').classList.remove('active'); });
+
+// Messaggio iniziale
+showNotice('Premi <b>📡</b> per attivare il GPS. In anteprima il GPS è bloccato dall\'iframe: usa <b>▶ Simula</b> per provare distanza ed ETA verso un waypoint (📍).');
+</script>
+</body>
+</html>
